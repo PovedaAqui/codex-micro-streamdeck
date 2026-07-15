@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.12
+#!/usr/bin/env python
 """
 Codex Micro Stream Deck Bridge — MVP for 6-key Stream Deck
 
@@ -8,7 +8,8 @@ Replicates the Codex Micro experience on a 6-key Stream Deck with 2 pages:
 
 Requires:
   - Stream Deck hardware connected via USB
-  - System dependencies: sudo apt-get install -y libhidapi-libusb0 libusb-1.0-0-dev
+  - Python 3.8+ (3.11+ recommended)
+  - System dependencies: see README.md (apt-get on Linux, pip on Windows)
   - Python packages: pip install streamdeck pillow pyyaml
 
 Usage:
@@ -20,7 +21,6 @@ Usage:
 import sys
 import os
 import time
-import signal
 import threading
 import argparse
 from pathlib import Path
@@ -382,15 +382,11 @@ def main():
 
     bridge = StreamDeckBridge(args.config, args.simulate)
 
-    # Handle signals gracefully
-    def signal_handler(sig, frame):
-        bridge._running = False
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
     bridge.run()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nBridge stopped.")
