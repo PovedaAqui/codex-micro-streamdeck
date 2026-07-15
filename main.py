@@ -24,7 +24,7 @@ import time
 import threading
 import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import yaml
 from PIL import Image, ImageDraw
@@ -55,13 +55,32 @@ AGENT_COLORS = {
 }
 
 # Key mapping for 6-key Stream Deck
+# Each key has different behavior on page 1 vs page 2
 KEY_MAP = {
-    0: {"name": "Agent Status", "page": 1, "type": "agent_status"},
-    1: {"name": "Accept", "page": 1, "type": "command", "action": "accept"},
-    2: {"name": "Reject", "page": 1, "type": "command", "action": "reject"},
-    3: {"name": "New Chat", "page": 1, "type": "command", "action": "new_chat"},
-    4: {"name": "Reasoning", "page": 1, "type": "reasoning", "action": "toggle_reasoning"},
-    5: {"name": "→ Page 2", "page": 1, "type": "page_switch", "action": "next_page"},
+    0: {
+        "page1": {"name": "Agent Status", "type": "agent_status"},
+        "page2": {"name": "PR Review", "type": "workflow", "action": "pr_review"},
+    },
+    1: {
+        "page1": {"name": "Accept", "type": "command", "action": "accept"},
+        "page2": {"name": "Debug", "type": "workflow", "action": "debug"},
+    },
+    2: {
+        "page1": {"name": "Reject", "type": "command", "action": "reject"},
+        "page2": {"name": "Refactor", "type": "workflow", "action": "refactor"},
+    },
+    3: {
+        "page1": {"name": "New Chat", "type": "command", "action": "new_chat"},
+        "page2": {"name": "Test/Deploy", "type": "workflow", "action": "test_deploy"},
+    },
+    4: {
+        "page1": {"name": "Reasoning", "type": "reasoning", "action": "toggle_reasoning"},
+        "page2": {"name": "Stop All", "type": "system", "action": "stop_all"},
+    },
+    5: {
+        "page1": {"name": "→ Page 2", "type": "page_switch", "action": "next_page"},
+        "page2": {"name": "← Page 1", "type": "page_switch", "action": "prev_page"},
+    },
 }
 
 
@@ -71,6 +90,8 @@ class AgentMonitor:
     def __init__(self):
         self.current_state = "idle"
         self._lock = threading.Lock()
+        self._conversation_history: List[str] = []
+        self._last_response: Optional[str] = None
 
     def set_state(self, state: str):
         if state in AGENT_STATES:
@@ -81,13 +102,34 @@ class AgentMonitor:
         with self._lock:
             return self.current_state
 
-    def infer_state_from_conversation(self, last_message: Optional[str] = None, has_response: bool = False) -> str:
-        """Infer agent state from conversation context (MVP approach)."""
-        if last_message and not has_response:
-            return "thinking"
-        elif has_response:
-            return "done"
-        return "idle"
+    def add_message(self, message: str, is_response: bool = False):
+        """Add a message to conversation history and infer state."""
+        with self._lock:
+            self._conversation_history.append(message)
+            if is_response:
+                self._last_response = message
+                self.current_state = "done"
+            else:
+                self.current_state = "thinking"
+
+    def new_chat(self):
+        """Reset conversation and state."""
+        with self._lock:
+            self._conversation_history.clear()
+            self._last_response = None
+            self.current_state = "idle"
+
+    def infer_state_from_conversation(self) -> str:
+        """Infer agent state from conversation context."""
+        with self._lock:
+            if not self._conversation_history:
+                return "idle"
+            if self._last_response is not None:
+                return "done"
+            # Last message was a user message without response yet
+            if self._conversation_history[-1] and not self._conversation_history[-1].startswith("__RESPONSE__"):
+                return "thinking"
+            return "idle"
 
 
 class ReasoningLevel:
@@ -171,72 +213,111 @@ class StreamDeckBridge:
         try:
             img = self._create_key_image(color, icon_path)
             self.deck.set_key_image(key_index, img)
-            self.deck.show()
+            # set_key_image updates the display automatically; no show() needed
         except Exception as e:
             print(f"Error updating key {key_index}: {e}")
 
+    def _get_key_config(self, key_index: int) -> Optional[dict]:
+        """Get the current key config based on the current page."""
+        if key_index not in self.key_map:
+            return None
+        page_key = f"page{self.current_page}"
+        return self.key_map[key_index].get(page_key)
+
     def _render_page(self, page: int):
         """Render all keys for a given page."""
+        self.current_page = page
+
         if self.simulate:
             print(f"\n[SIM] Rendering Page {page}:")
-            for key_index, key_config in self.key_map.items():
-                if key_config["page"] != page:
+            for key_index in range(6):
+                key_config = self._get_key_config(key_index)
+                if not key_config:
                     continue
 
-                if key_config["type"] == "agent_status":
+                key_type = key_config.get("type")
+                key_name = key_config.get("name", f"Key {key_index}")
+
+                if key_type == "agent_status":
                     state = self.agent_monitor.get_state()
                     color = AGENT_COLORS.get(state, "#808080")
                     icon_path = self._get_icon_path("agent_status", state)
-                    print(f"  Key {key_index}: {key_config['name']} → {state.upper()} ({color})")
+                    print(f"  Key {key_index}: {key_name} → {state.upper()} ({color})")
                     self._update_key(key_index, color, icon_path)
 
-                elif key_config["type"] == "command":
-                    color = "#32CD32" if key_config["action"] == "accept" else "#FF4500"
-                    print(f"  Key {key_index}: {key_config['name']} → {color}")
+                elif key_type == "command":
+                    action = key_config.get("action")
+                    if action == "accept":
+                        color = "#32CD32"
+                    else:
+                        color = "#FF4500"
+                    print(f"  Key {key_index}: {key_name} → {color}")
                     self._update_key(key_index, color)
 
-                elif key_config["type"] == "reasoning":
+                elif key_type == "reasoning":
                     level = self.reasoning.get_current()
-                    print(f"  Key {key_index}: {key_config['name']} → {level['name']} ({level['color']})")
+                    print(f"  Key {key_index}: {key_name} → {level['name']} ({level['color']})")
                     self._update_key(key_index, level["color"])
 
-                elif key_config["type"] == "page_switch":
-                    print(f"  Key {key_index}: {key_config['name']}")
-                    self._update_key(key_index, "#808080")
+                elif key_type == "page_switch":
+                    color = "#808080"
+                    print(f"  Key {key_index}: {key_name}")
+                    self._update_key(key_index, color)
+
+                elif key_type == "workflow":
+                    print(f"  Key {key_index}: {key_name} → [workflow]")
+                    self._update_key(key_index, "#4169E1")
+
+                elif key_type == "system":
+                    print(f"  Key {key_index}: {key_name} → [system]")
+                    self._update_key(key_index, "#DC143C")
+
             return
 
         if not self.deck:
             return
 
-        for key_index, key_config in self.key_map.items():
-            if key_config["page"] != page:
+        for key_index in range(6):
+            key_config = self._get_key_config(key_index)
+            if not key_config:
                 continue
 
-            if key_config["type"] == "agent_status":
+            key_type = key_config.get("type")
+
+            if key_type == "agent_status":
                 state = self.agent_monitor.get_state()
                 color = AGENT_COLORS.get(state, "#808080")
                 icon_path = self._get_icon_path("agent_status", state)
                 self._update_key(key_index, color, icon_path)
 
-            elif key_config["type"] == "command":
-                color = "#32CD32" if key_config["action"] == "accept" else "#FF4500"
+            elif key_type == "command":
+                action = key_config.get("action")
+                if action == "accept":
+                    color = "#32CD32"
+                else:
+                    color = "#FF4500"
                 self._update_key(key_index, color)
 
-            elif key_config["type"] == "reasoning":
+            elif key_type == "reasoning":
                 level = self.reasoning.get_current()
                 self._update_key(key_index, level["color"])
 
-            elif key_config["type"] == "page_switch":
+            elif key_type == "page_switch":
                 self._update_key(key_index, "#808080")
+
+            elif key_type == "workflow":
+                self._update_key(key_index, "#4169E1")
+
+            elif key_type == "system":
+                self._update_key(key_index, "#DC143C")
 
     def _start_agent_monitoring(self):
         """Start background thread for agent state monitoring."""
         def monitor_loop():
             while self._running:
-                # MVP: Simulate agent state changes
-                # In production, this would poll the OpenAI API or ChatGPT Desktop App
                 state = self.agent_monitor.infer_state_from_conversation()
                 self.agent_monitor.set_state(state)
+                self._render_page(self.current_page)
                 time.sleep(self.config.get("polling_interval", 3))
 
         thread = threading.Thread(target=monitor_loop, daemon=True)
@@ -247,11 +328,15 @@ class StreamDeckBridge:
         if key_index not in self.key_map:
             return
 
-        key_config = self.key_map[key_index]
-        action = key_config.get("action")
-
         if not pressed:
             return
+
+        key_config = self._get_key_config(key_index)
+        if not key_config:
+            return
+
+        action = key_config.get("action")
+        key_type = key_config.get("type")
 
         if action == "next_page":
             self.current_page = 2
@@ -267,23 +352,32 @@ class StreamDeckBridge:
 
         elif action == "accept":
             print("Action: Accept response")
-            # TODO: Implement accept via OpenAI API
+            self.agent_monitor.add_message("__ACCEPTED__", is_response=True)
             self._update_key(key_index, "#00FF00")
-            time.sleep(0.5)
             self._render_page(self.current_page)
 
         elif action == "reject":
             print("Action: Reject response")
-            # TODO: Implement reject via OpenAI API
+            self.agent_monitor.add_message("__REJECTED__", is_response=True)
             self._update_key(key_index, "#FF0000")
-            time.sleep(0.5)
             self._render_page(self.current_page)
 
         elif action == "new_chat":
             print("Action: New chat")
-            # TODO: Implement new chat via OpenAI API
-            self.agent_monitor.set_state("idle")
+            self.agent_monitor.new_chat()
             self._render_page(1)
+
+        elif action in ("pr_review", "debug", "refactor", "test_deploy"):
+            print(f"Action: Workflow '{action}'")
+            # TODO: Implement workflow via OpenAI API
+            self._update_key(key_index, "#00FF00")
+            self._render_page(self.current_page)
+
+        elif action == "stop_all":
+            print("Action: Stop all")
+            self.agent_monitor.new_chat()
+            self._update_key(key_index, "#FF0000")
+            self._render_page(self.current_page)
 
     def _connect_streamdeck(self):
         """Connect to the Stream Deck hardware."""
