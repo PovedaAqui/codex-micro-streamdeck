@@ -1,0 +1,157 @@
+# Stream Deck configuration for Codex Micro bridge
+# 6-key layout: Page 1 (agent status) + Page 2 (workflows)
+
+# OpenAI API key (or set OPENAI_API_KEY environment variable)
+openai_api_key: ""
+
+# Polling interval in seconds for agent status monitoring
+polling_interval: 3
+
+# Key configuration
+# Keys are numbered 0-5 (physical key positions on the Stream Deck)
+keys:
+  # PAGE 1: Agent Status + Core Commands
+  0:
+    name: "Agent Status"
+    page: 1
+    type: agent_status  # Dynamic: changes icon/color based on agent state
+    icon_idle: icons/idle.png
+    icon_thinking: icons/thinking.png
+    icon_running: icons/running.png
+    icon_waiting: icons/waiting.png
+    icon_done: icons/done.png
+    icon_error: icons/error.png
+    color_idle: "#808080"
+    color_thinking: "#FFD700"
+    color_running: "#32CD32"
+    color_waiting: "#1E90FF"
+    color_done: "#9370DB"
+    color_error: "#FF4500"
+    action: monitor  # Special: continuously monitors agent state
+
+  1:
+    name: "Accept"
+    page: 1
+    type: command
+    icon: icons/accept.png
+    color: "#32CD32"
+    action: accept_response
+
+  2:
+    name: "Reject"
+    page: 1
+    type: command
+    icon: icons/reject.png
+    color: "#FF4500"
+    action: reject_response
+
+  3:
+    name: "New Chat"
+    page: 1
+    type: command
+    icon: icons/new_chat.png
+    color: "#1E90FF"
+    action: new_chat
+
+  4:
+    name: "Reasoning"
+    page: 1
+    type: reasoning_toggle
+    icon: icons/reasoning.png
+    color: "#FFA500"
+    action: toggle_reasoning  # Cycles: none → medium → high → none
+    levels:
+      - name: "Low"
+        value: "none"
+        color: "#90EE90"
+      - name: "Medium"
+        value: "medium"
+        color: "#FFA500"
+      - name: "High"
+        value: "high"
+        color: "#FF6347"
+    current_level: 0  # Index into levels array
+
+  5:
+    name: "→ Page 2"
+    page: 1
+    type: page_switch
+    icon: icons/next_page.png
+    color: "#808080"
+    action: switch_to_page_2
+
+# PAGE 2: Workflows + System
+  6:  # Note: on a 6-key deck, keys 0-5 are the physical keys
+      # This is a conceptual key 6 for documentation only
+    name: "PR Review"
+    page: 2
+    type: workflow
+    icon: icons/pr_review.png
+    color: "#4169E1"
+    action: launch_workflow
+    workflow: pr_review
+
+  7:
+    name: "Debug"
+    page: 2
+    type: workflow
+    icon: icons/debug.png
+    color: "#FF8C00"
+    action: launch_workflow
+    workflow: debug
+
+  8:
+    name: "Refactor"
+    page: 2
+    type: workflow
+    icon: icons/refactor.png
+    color: "#9370DB"
+    action: launch_workflow
+    workflow: refactor
+
+  9:
+    name: "Test/Deploy"
+    page: 2
+    type: workflow
+    icon: icons/test_deploy.png
+    color: "#20B2AA"
+    action: launch_workflow
+    workflow: test_deploy
+
+  10:
+    name: "Stop All"
+    page: 2
+    type: system
+    icon: icons/stop_all.png
+    color: "#DC143C"
+    action: stop_all_agents
+
+  11:
+    name: "→ Page 1"
+    page: 2
+    type: page_switch
+    icon: icons/prev_page.png
+    color: "#808080"
+    action: switch_to_page_1
+
+# Workflow definitions
+workflows:
+  pr_review:
+    name: "PR Review"
+    prompt: "Review this pull request and provide feedback on code quality, security, and performance."
+    reasoning_effort: "medium"
+
+  debug:
+    name: "Debug"
+    prompt: "Debug the following error and suggest a fix."
+    reasoning_effort: "high"
+
+  refactor:
+    name: "Refactor"
+    prompt: "Refactor this code to improve readability and maintainability."
+    reasoning_effort: "medium"
+
+  test_deploy:
+    name: "Test/Deploy"
+    prompt: "Run tests and prepare deployment for the following code."
+    reasoning_effort: "low"

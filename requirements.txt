@@ -1,0 +1,11 @@
+# Stream Deck Codex Micro Bridge — Dependencies
+
+# Python packages (install via pip)
+streamdeck
+pillow
+pyyaml
+openai
+
+# System packages (install via apt):
+#   sudo apt-get install -y libhidapi-libusb0 libusb-1.0-0-dev
+# These are required by the Stream Deck HID backend
